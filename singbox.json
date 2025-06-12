@@ -1,0 +1,193 @@
+{
+  "log": {
+    "level": "debug",
+    "timestamp": true
+  },
+  "dns": {
+    "servers": [
+      {
+        "tag": "remote",
+        "address": "https://1.1.1.1/dns-query",
+        "detour": "proxy"
+      },
+      {
+        "tag": "local",
+        "address": "https://223.5.5.5/dns-query",
+        "detour": "direct"
+      },
+      {
+        "tag": "block",
+        "address": "rcode://success"
+      }
+    ],
+    "rules": [
+      // 1. 你最关心的域名优先直连
+      { "domain_suffix": ["apple.com", "icloud.com", "me.com"], "server": "local" },
+      { "domain": ["github.com", "raw.githubusercontent.com"], "server": "local" },
+
+      // 2. 广告拦截
+      { "rule_set": ["adguard-ads"], "server": "block" },
+
+      // 3. geosite 智能分流
+      { "rule_set": ["geosite-cn"], "server": "local" },
+      { "rule_set": ["geosite-geolocation-!cn"], "server": "remote" },
+
+      // 4. Clash模式
+      { "clash_mode": "direct", "server": "local" },
+      { "clash_mode": "global", "server": "remote" },
+
+      // 5. 兜底
+      { "outbound": "any", "server": "local" }
+    ],
+    "final": "remote",
+    "strategy": "prefer_ipv4",
+    "client_subnet": "171.223.85.0/24"
+  },
+  "experimental": {
+    "cache_file": {
+      "enabled": true,
+      "path": "cache.db",
+      "cache_id": "cache_db",
+      "store_rdrc": true,
+      "rdrc_timeout": "7d"
+    }
+  },
+  "inbounds": [
+    {
+      "type": "tun",
+      "tag": "tun-in",
+      "address": [
+        "172.19.0.1/30",
+        "fdfe:dcba:9876::1/126"
+      ],
+      "mtu": 1400,
+      "auto_route": true,
+      "strict_route": true,
+      "stack": "mixed",
+      "endpoint_independent_nat": true,
+      "sniff": true,
+      "sniff_override_destination": true,
+      "domain_strategy": "prefer_ipv4",
+      "udp_timeout": "5m"
+    },
+    {
+      "type": "socks",
+      "tag": "socks-in",
+      "listen": "127.0.0.1",
+      "listen_port": 2333,
+      "sniff": true,
+      "sniff_override_destination": true,
+      "domain_strategy": "prefer_ipv4"
+    },
+    {
+      "type": "mixed",
+      "tag": "mixed-in",
+      "listen": "127.0.0.1",
+      "listen_port": 2334,
+      "sniff": true,
+      "sniff_override_destination": true,
+      "domain_strategy": "prefer_ipv4"
+    }
+  ],
+  "outbounds": [
+    {
+      "type": "vless",
+      "tag": "proxy",
+      "server": "real.guyifashi.top",
+      "server_port": 443,
+      "uuid": "75a877ce-9a68-4c53-a37c-28098c06ff31",
+      "packet_encoding": "xudp",
+      "flow": "xtls-rprx-vision",
+      "tcp_fast_open": true,
+      "multiplex": { "enabled": false },
+      "tls": {
+        "enabled": true,
+        "insecure": false,
+        "server_name": "real.guyifashi.top",
+        "reality": {
+          "enabled": true,
+          "public_key": "3UYWqdk_RQDI23DRdEB6WKebxJ8Q-q_6nhnufsAh-Gk",
+          "short_id": "006825"
+        },
+        "utls": {
+          "enabled": true,
+          "fingerprint": "chrome"
+        }
+      }
+    },
+    { "type": "direct", "tag": "direct" },
+    { "type": "block", "tag": "block" },
+    { "type": "dns", "tag": "dns-out" }
+  ],
+  "route": {
+    "auto_detect_interface": true,
+    "rules": [
+      // 入口流量嗅探与解析
+      { "inbound": ["tun-in", "socks-in", "mixed-in"], "action": "sniff" },
+      { "inbound": ["tun-in", "socks-in", "mixed-in"], "action": "resolve", "strategy": "prefer_ipv4" },
+
+      // DNS 流量专用出口
+      { "protocol": "dns", "outbound": "dns-out" },
+
+      // 1. 显式强制代理高频国外/AI服务（优先级最高）
+      { "domain_suffix": ["google.com", "googlevideo.com", "gstatic.com", "ytimg.com", "youtube.com"], "outbound": "proxy" },
+      { "domain_suffix": ["openai.com", "chatgpt.com"], "outbound": "proxy" },
+      { "domain_suffix": ["gemini.google.com"], "outbound": "proxy" },
+      { "domain_suffix": ["anthropic.com", "claude.ai"], "outbound": "proxy" },
+      { "domain_suffix": ["perplexity.ai"], "outbound": "proxy" },
+
+      // 2. 显式直连（私有网、本地特殊服务等）
+      { "ip_is_private": true, "outbound": "direct" },
+      { "domain": ["github.com", "raw.githubusercontent.com"], "outbound": "direct" },
+      { "domain_suffix": ["apple.com", "icloud.com", "me.com"], "outbound": "direct" },
+      { "protocol": "bittorrent", "outbound": "direct" },
+      { "ip_cidr": ["120.241.226.32/32", "36.151.65.8/32", "120.241.236.44/32", "120.236.198.164/32"], "outbound": "direct" },
+
+      // 3. 广告拦截
+      { "rule_set": ["adguard-ads"], "outbound": "block" },
+
+      // 4. 智能分流 geosite/geolocation
+      { "rule_set": ["geosite-cn", "geoip-cn"], "outbound": "direct" },        // 国内流量直连
+      { "rule_set": ["geosite-geolocation-!cn"], "outbound": "proxy" },        // 国外流量代理
+
+      // 5. Clash模式支持
+      { "clash_mode": "direct", "outbound": "direct" },
+      { "clash_mode": "global", "outbound": "proxy" }
+    ],
+    "rule_set": [
+      {
+        "tag": "geosite-cn",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-cn.srs",
+        "download_detour": "direct",
+        "update_interval": "1d"
+      },
+      {
+        "tag": "geoip-cn",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-cn.srs",
+        "download_detour": "direct",
+        "update_interval": "1d"
+      },
+      {
+        "tag": "geosite-geolocation-!cn",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-geolocation-!cn.srs",
+        "download_detour": "direct",
+        "update_interval": "1d"
+      },
+      {
+        "tag": "adguard-ads",
+        "type": "remote",
+        "format": "binary",
+        "url": "https://github.com/MetaCubeX/meta-rules-dat/raw/refs/heads/sing/geo/geosite/category-ads-all.srs",
+        "download_detour": "direct",
+        "update_interval": "1d"
+      }
+    ],
+    "final": "proxy"
+  }
+}
