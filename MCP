@@ -1,0 +1,725 @@
+// src/index.ts - 完整工作的智能听写助手MCP服务器
+import { exec } from ‘child_process’;
+import { promisify } from ‘util’;
+import fetch from ‘node-fetch’;
+import { writeFileSync, unlinkSync, existsSync, mkdirSync } from ‘fs’;
+import { join } from ‘path’;
+
+const execAsync = promisify(exec);
+
+async function createServer() {
+try {
+// 动态导入MCP模块
+const { Server } = await import(’@modelcontextprotocol/sdk/server/index.js’);
+const { StdioServerTransport } = await import(’@modelcontextprotocol/sdk/server/stdio.js’);
+const { CallToolRequestSchema, ListToolsRequestSchema } = await import(’@modelcontextprotocol/sdk/types.js’);
+
+```
+// 创建服务器实例
+const server = new Server(
+  {
+    name: 'dictation-assistant',
+    version: '1.0.0',
+  },
+  {
+    capabilities: {
+      tools: {},
+    },
+  }
+);
+
+// 创建音频缓存目录
+const audioDir = join(process.cwd(), 'audio_cache');
+try {
+  if (!existsSync(audioDir)) {
+    mkdirSync(audioDir, { recursive: true });
+    console.error('✅ 音频缓存目录已创建');
+  }
+} catch (error) {
+  console.error('⚠️  音频缓存目录创建失败，将跳过音频缓存功能:', error);
+}
+
+// 动态存储从搜索中获取的教材词语
+const dynamicTextbookWords = new Map<string, { pinyin: string, words: string[] }>();
+
+// 当前语音设置
+let voiceSettings = {
+  service: 'google',
+  voice: 'cmn-CN-Wavenet-D',
+  speed: 1.0,
+  pitch: 0.0,
+  pauseDuration: 10 // 每个生字后的停顿时间（秒）
+};
+
+// 生成音频文件的哈希名称
+function getAudioFileName(text: string): string {
+  const hash = Buffer.from(text + voiceSettings.voice + voiceSettings.speed + voiceSettings.pitch).toString('base64').replace(/[/+=]/g, '');
+  return `${hash}.mp3`;
+}
+
+// 预生成单个音频文件
+async function preGenerateAudio(text: string): Promise<string> {
+  const fileName = getAudioFileName(text);
+  const filePath = join(audioDir, fileName);
+  
+  // 检查缓存
+  if (existsSync(filePath)) {
+    console.error(`📁 使用缓存音频: ${text.substring(0, 20)}...`);
+    return filePath;
+  }
+
+  try {
+    const apiKey = process.env.GOOGLE_TTS_API_KEY;
+    
+    if (!apiKey || apiKey === 'your_google_api_key_here') {
+      throw new Error('Google TTS API Key未配置');
+    }
+
+    console.error(`🎵 生成音频: ${text.substring(0, 20)}...`);
+
+    const requestData = {
+      input: { text: text },
+      voice: {
+        languageCode: 'cmn-CN',
+        name: voiceSettings.voice,
+        ssmlGender: voiceSettings.voice.includes('A') || voiceSettings.voice.includes('D') ? 'FEMALE' : 'MALE'
+      },
+      audioConfig: {
+        audioEncoding: 'MP3',
+        speakingRate: voiceSettings.speed,
+        pitch: voiceSettings.pitch,
+        volumeGainDb: 0.0,
+        sampleRateHertz: 24000
+      }
+    };
+
+    const response = await fetch(`https://texttospeech.googleapis.com/v1/text:synthesize?key=${apiKey}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestData)
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Google TTS API错误: ${response.status} - ${errorText}`);
+    }
+
+    const result = await response.json() as any;
+    
+    if (result.audioContent) {
+      const audioBuffer = Buffer.from(result.audioContent, 'base64');
+      writeFileSync(filePath, audioBuffer);
+      console.error(`💾 音频已保存: ${fileName}`);
+      return filePath;
+    } else {
+      throw new Error('Google TTS返回数据无效');
+    }
+
+  } catch (error) {
+    console.error(`生成音频失败: ${error}`);
+    throw error;
+  }
+}
+
+// 播放音频文件
+async function playAudio(filePath: string): Promise<void> {
+  try {
+    await execAsync(`afplay "${filePath}"`);
+  } catch (error) {
+    console.error(`播放音频失败: ${error}`);
+  }
+}
+
+// 延迟函数
+function delay(seconds: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, seconds * 1000));
+}
+
+// 调用火山引擎API获取教材标准词语
+async function fetchTextbookWords(grade: string, semester: string, textbook: string, lesson?: number): Promise<Record<string, { pinyin: string, words: string[] }>> {
+  try {
+    const volcanoApiKey = process.env.VOLCANO_API_KEY;
+    const volcanoBaseUrl = process.env.VOLCANO_BASE_URL || 'https://ark.cn-beijing.volces.com/api/v3';
+    const volcanoModel = process.env.VOLCANO_MODEL || 'deepseek-r1-250528';
+    
+    if (!volcanoApiKey || volcanoApiKey === 'your_volcano_api_key_here') {
+      console.error('火山引擎API未配置，无法获取教材词语');
+      return {};
+    }
+
+    console.error(`🔍 调用火山引擎API获取${textbook}${grade}${semester}${lesson ? `第${lesson}课` : ''}的标准词语...`);
+    
+    // 构建查询提示词
+    let prompt = '';
+    if (lesson) {
+      prompt = `请提供${textbook}${grade}${semester}第${lesson}课的所有生字，包括拼音和三个标准词语。
+```
+
+要求：
+
+1. 返回JSON格式数据
+1. 每个生字包含拼音和三个教材标准词语
+1. 格式如下：
+   {
+   “生字”: {
+   “pinyin”: “拼音”,
+   “words”: [“词语1”, “词语2”, “词语3”]
+   }
+   }
+
+请确保词语来自教材标准配套，适合小学生学习。只返回JSON数据，不要其他说明文字。`; } else { prompt = `请提供${textbook}${grade}${semester}的所有生字，包括拼音和三个标准词语。
+
+要求：
+
+1. 返回JSON格式数据
+1. 每个生字包含拼音和三个教材标准词语
+1. 按课文顺序排列
+1. 格式如下：
+   {
+   “生字”: {
+   “pinyin”: “拼音”,
+   “words”: [“词语1”, “词语2”, “词语3”]
+   }
+   }
+
+只返回JSON数据，不要其他说明文字。`;
+}
+
+```
+    // 调用火山引擎API
+    const response = await fetch(`${volcanoBaseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${volcanoApiKey}`
+      },
+      body: JSON.stringify({
+        model: volcanoModel,
+        messages: [
+          {
+            role: 'system',
+            content: '你是一个专业的小学语文教材助手，能够准确提供教材中的生字信息。请只返回要求的JSON格式数据，不要添加任何解释说明。'
+          },
+          {
+            role: 'user',
+            content: prompt
+          }
+        ]
+      })
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`火山引擎API调用失败: ${response.status} ${response.statusText} - ${errorText}`);
+    }
+
+    const result = await response.json() as any;
+    const content = result.choices?.[0]?.message?.content;
+    
+    if (!content) {
+      throw new Error('火山引擎API返回数据格式错误');
+    }
+
+    console.error('🔍 API原始响应:', content.substring(0, 200) + '...');
+
+    // 解析JSON响应
+    try {
+      // 提取JSON部分（处理可能的markdown格式或多余文字）
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        throw new Error('响应中未找到有效的JSON数据');
+      }
+
+      const wordsData = JSON.parse(jsonMatch[0]);
+      const characterCount = Object.keys(wordsData).length;
+      console.error(`✅ 成功获取${characterCount}个生字的标准词语`);
+      
+      // 验证数据格式
+      for (const [char, data] of Object.entries(wordsData)) {
+        if (typeof data !== 'object' || !data.pinyin || !Array.isArray(data.words)) {
+          console.error(`⚠️  生字"${char}"数据格式不正确:`, data);
+        }
+      }
+      
+      return wordsData;
+      
+    } catch (parseError) {
+      console.error('解析火山引擎API响应失败:', parseError);
+      console.error('原始响应:', content);
+      throw new Error(`火山引擎API响应格式无效: ${parseError.message}`);
+    }
+
+  } catch (error) {
+    console.error(`调用火山引擎API失败: ${error}`);
+    return {};
+  }
+}
+
+// 预生成所有听写音频
+async function preGenerateAllDictationAudio(characters: string[]): Promise<Map<string, string>> {
+  const audioFiles = new Map<string, string>();
+  
+  console.error(`🎵 开始预生成${characters.length}个生字的音频文件...`);
+  
+  for (let i = 0; i < characters.length; i++) {
+    const character = characters[i];
+    const { pinyin, words } = getWordsForCharacter(character);
+    
+    // 构建朗读文本
+    const text = `第${i + 1}个生字：${character}，拼音：${pinyin}。词语：${words.join('，')}`;
+    
+    try {
+      const audioFile = await preGenerateAudio(text);
+      audioFiles.set(character, audioFile);
+      console.error(`✅ [${i + 1}/${characters.length}] ${character} 音频已生成`);
+    } catch (error) {
+      console.error(`❌ [${i + 1}/${characters.length}] ${character} 音频生成失败: ${error}`);
+    }
+    
+    // 避免API限流，稍微延迟
+    if (i < characters.length - 1) {
+      await delay(0.2);
+    }
+  }
+  
+  console.error(`🎉 所有音频预生成完成！`);
+  return audioFiles;
+}
+
+// 自动播放听写序列
+async function playDictationSequence(characters: string[], audioFiles: Map<string, string>, sessionId: string): Promise<void> {
+  console.error(`🔊 开始自动播放听写序列...`);
+  
+  for (let i = 0; i < characters.length; i++) {
+    const character = characters[i];
+    const audioFile = audioFiles.get(character);
+    
+    if (audioFile && existsSync(audioFile)) {
+      console.error(`🔊 [${i + 1}/${characters.length}] 播放: ${character}`);
+      await playAudio(audioFile);
+      
+      // 不是最后一个字符时才停顿
+      if (i < characters.length - 1) {
+        console.error(`⏱️  等待${voiceSettings.pauseDuration}秒后继续...`);
+        await delay(voiceSettings.pauseDuration);
+      }
+    } else {
+      console.error(`❌ [${i + 1}/${characters.length}] ${character} 音频文件不存在`);
+    }
+  }
+  
+  console.error(`🎉 听写序列播放完成！`);
+}
+
+// 获取词语
+function getWordsForCharacter(character: string): { pinyin: string, words: string[] } {
+  return dynamicTextbookWords.get(character) || { 
+    pinyin: 'unknown', 
+    words: [`${character}字`, `学${character}`, `写${character}`] 
+  };
+}
+
+// 注册工具列表
+server.setRequestHandler(ListToolsRequestSchema, async () => {
+  return {
+    tools: [
+      {
+        name: 'get_lesson_characters',
+        description: '获取指定课文的生字和标准词语',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            lesson_number: { type: 'number', description: '课文编号，如7' },
+            grade: { type: 'string', description: '年级', default: '三年级' },
+            semester: { type: 'string', description: '学期', default: '下册' },
+            textbook: { type: 'string', description: '教材版本', default: '部编版' }
+          },
+          required: ['lesson_number']
+        }
+      },
+      {
+        name: 'search_characters',
+        description: '搜索指定教材的生字',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            grade: { type: 'string', description: '年级，如"三年级"' },
+            semester: { type: 'string', description: '学期，如"下册"' },
+            textbook: { type: 'string', description: '教材版本，如"部编版"' }
+          },
+          required: ['grade', 'semester', 'textbook']
+        }
+      },
+      {
+        name: 'start_dictation',
+        description: '开始听写会话（预生成音频并自动播放）',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            characters: { 
+              type: 'array', 
+              items: { type: 'string' },
+              description: '要听写的生字列表' 
+            },
+            with_voice: { type: 'boolean', description: '是否启用语音朗读', default: true }
+          },
+          required: ['characters']
+        }
+      },
+      {
+        name: 'speak_character',
+        description: '朗读生字和词语',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            character: { type: 'string', description: '要朗读的生字' },
+            include_words: { type: 'boolean', description: '是否包含词语', default: true }
+          },
+          required: ['character']
+        }
+      },
+      {
+        name: 'refine_words',
+        description: '要求火山引擎重新生成或调整生字词语',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            character: { type: 'string', description: '要调整词语的生字' },
+            requirements: { type: 'string', description: '调整要求，如"更简单的词语"、"更常用的词语"等' }
+          },
+          required: ['character', 'requirements']
+        }
+      },
+      {
+        name: 'set_voice_settings',
+        description: '设置语音参数',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            voice: { type: 'string', description: '语音名称', default: 'cmn-CN-Wavenet-D' },
+            speed: { type: 'number', description: '语速(0.25-4.0)', default: 1.0 },
+            pause_duration: { type: 'number', description: '生字间停顿时间(秒)', default: 10 }
+          }
+        }
+      }
+    ]
+  };
+});
+
+// 存储会话数据
+const sessions = new Map<string, {
+  characters: string[],
+  currentIndex: number,
+  withVoice: boolean,
+  startTime: number,
+  audioFiles?: Map<string, string>,
+  isPlaying?: boolean
+}>();
+
+// 注册工具调用处理器
+server.setRequestHandler(CallToolRequestSchema, async (request: any) => {
+  const { name, arguments: args } = request.params;
+
+  try {
+    switch (name) {
+      case 'get_lesson_characters': {
+        const { lesson_number, grade = '三年级', semester = '下册', textbook = '部编版' } = args;
+        console.error(`📚 获取第${lesson_number}课生字和词语`);
+        
+        const lessonData = await fetchTextbookWords(grade, semester, textbook, lesson_number);
+        
+        if (Object.keys(lessonData).length === 0) {
+          return {
+            content: [{
+              type: 'text',
+              text: `❌ 暂未找到第${lesson_number}课的生字信息\n\n可能原因：\n1. 火山引擎API配置问题\n2. 网络连接问题\n3. 课文编号不存在\n\n请检查配置或尝试其他课文编号。`
+            }]
+          };
+        }
+
+        // 更新动态词语库
+        for (const [char, data] of Object.entries(lessonData)) {
+          dynamicTextbookWords.set(char, data);
+        }
+
+        const characters = Object.keys(lessonData);
+        
+        let detailText = `📚 ${textbook}${grade}${semester}第${lesson_number}课\n\n`;
+        detailText += `📝 本课生字（${characters.length}个）：\n${characters.join('、')}\n\n`;
+        detailText += `📖 生字详情：\n`;
+        
+        for (const [char, data] of Object.entries(lessonData)) {
+          detailText += `${char}（${data.pinyin}）- ${data.words.join('、')}\n`;
+        }
+        
+        detailText += `\n🎤 当前语音：Google TTS - ${voiceSettings.voice}`;
+        detailText += `\n⏱️ 停顿时间：${voiceSettings.pauseDuration}秒`;
+        detailText += `\n💡 可以直接开始听写这些生字`;
+
+        return {
+          content: [{
+            type: 'text',
+            text: detailText
+          }]
+        };
+      }
+
+      case 'search_characters': {
+        const { grade, semester, textbook } = args;
+        console.error(`🔍 搜索生字: ${textbook} ${grade} ${semester}`);
+        
+        const allData = await fetchTextbookWords(grade, semester, textbook);
+        
+        if (Object.keys(allData).length === 0) {
+          return {
+            content: [{
+              type: 'text',
+              text: `❌ 暂未找到${textbook}${grade}${semester}的生字信息\n\n请检查火山引擎API配置或网络连接。`
+            }]
+          };
+        }
+
+        // 更新动态词语库
+        for (const [char, data] of Object.entries(allData)) {
+          dynamicTextbookWords.set(char, data);
+        }
+
+        const characters = Object.keys(allData);
+        
+        return {
+          content: [{
+            type: 'text',
+            text: `✅ 找到${characters.length}个${textbook}${grade}${semester}生字：\n\n${characters.join('、')}\n\n📚 已加载教材标准词语\n🔊 支持语音朗读功能！\n\n💡 可以选择部分生字开始听写练习`
+          }]
+        };
+      }
+
+      case 'start_dictation': {
+        const { characters, with_voice = true } = args;
+        const sessionId = `session_${Date.now()}`;
+        
+        if (!with_voice) {
+          sessions.set(sessionId, {
+            characters,
+            currentIndex: 0,
+            withVoice: false,
+            startTime: Date.now()
+          });
+          
+          return {
+            content: [{
+              type: 'text',
+              text: `🎯 听写会话已开始（无语音）！\n\n📋 听写生字：${characters.join('、')}\n📊 共 ${characters.length} 个生字\n🆔 会话ID：${sessionId}`
+            }]
+          };
+        }
+
+        // 启用语音的听写 - 预生成所有音频
+        try {
+          console.error(`📝 开始听写: ${characters.length}个生字（启用语音）`);
+          
+          const responseText = `🎯 听写会话开始！\n\n📋 听写生字：${characters.join('、')}\n📊 共 ${characters.length} 个生字\n🆔 会话ID：${sessionId}\n\n🎵 正在预生成音频文件，请稍候...\n⏱️ 每个生字后将停顿${voiceSettings.pauseDuration}秒\n\n🎙️ 音频生成完成后将自动开始播放！`;
+          
+          // 先返回响应，然后在后台处理
+          setImmediate(async () => {
+            try {
+              // 预生成所有音频
+              const audioFiles = await preGenerateAllDictationAudio(characters);
+              
+              // 存储会话信息
+              sessions.set(sessionId, {
+                characters,
+                currentIndex: 0,
+                withVoice: true,
+                startTime: Date.now(),
+                audioFiles,
+                isPlaying: false
+              });
+              
+              console.error(`✅ 音频预生成完成，准备开始自动播放`);
+              
+              // 开始自动播放序列
+              const session = sessions.get(sessionId);
+              if (session && !session.isPlaying) {
+                session.isPlaying = true;
+                await playDictationSequence(characters, audioFiles, sessionId);
+                session.isPlaying = false;
+              }
+              
+            } catch (error) {
+              console.error(`听写会话处理失败: ${error}`);
+            }
+          });
+          
+          return {
+            content: [{
+              type: 'text',
+              text: responseText
+            }]
+          };
+          
+        } catch (error) {
+          return {
+            content: [{
+              type: 'text',
+              text: `❌ 启动听写失败: ${error}`
+            }]
+          };
+        }
+      }
+
+      case 'speak_character': {
+        const { character, include_words = true } = args;
+        
+        const { pinyin, words } = getWordsForCharacter(character);
+        
+        // 构建朗读文本
+        let textToSpeak = `生字：${character}，拼音：${pinyin}`;
+        if (include_words) {
+          textToSpeak += `。词语：${words.join('，')}`;
+        }
+        
+        try {
+          const audioFile = await preGenerateAudio(textToSpeak);
+          await playAudio(audioFile);
+          
+          const isFromTextbook = dynamicTextbookWords.has(character);
+          
+          return {
+            content: [{
+              type: 'text',
+              text: `🔊 已朗读生字"${character}"（${pinyin}）${include_words ? '和标准词语' : ''}\n\n📖 词语：${words.join('、')}\n📚 来源：${isFromTextbook ? '教材标准' : '系统生成'}\n🎤 语音：Google TTS`
+            }]
+          };
+        } catch (error) {
+          return {
+            content: [{
+              type: 'text',
+              text: `❌ 朗读失败: ${error}\n\n请检查Google TTS API配置。`
+            }]
+          };
+        }
+      }
+
+      case 'refine_words': {
+        const { character, requirements } = args;
+        
+        try {
+          const volcanoApiKey = process.env.VOLCANO_API_KEY;
+          const volcanoBaseUrl = process.env.VOLCANO_BASE_URL || 'https://ark.cn-beijing.volces.com/api/v3';
+          const volcanoModel = process.env.VOLCANO_MODEL || 'deepseek-r1-250528';
+          
+          if (!volcanoApiKey || volcanoApiKey === 'your_volcano_api_key_here') {
+            return {
+              content: [{
+                type: 'text',
+                text: `❌ 火山引擎API未配置，无法调整词语\n\n请在.env文件中配置VOLCANO_API_KEY`
+              }]
+            };
+          }
+
+          const prompt = `请为生字"${character}"重新生成三个词语，要求：${requirements}
+```
+
+规则：
+
+1. 返回JSON格式：{“pinyin”: “拼音”, “words”: [“词语1”, “词语2”, “词语3”]}
+1. 词语要适合小学生学习
+1. 词语要能明确体现生字的含义
+1. 优先选择教材中的标准词语
+
+生字：${character}
+要求：${requirements}
+
+只返回JSON数据，不要其他说明文字。`;
+
+```
+          console.error(`🔄 要求火山引擎调整生字"${character}"的词语...`);
+
+          const response = await fetch(`${volcanoBaseUrl}/chat/completions`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${volcanoApiKey}`
+            },
+            body: JSON.stringify({
+              model: volcanoModel,
+              messages: [
+                {
+                  role: 'system',
+                  content: '你是一个专业的小学语文教材助手，能够为生字生成合适的词语。请只返回要求的JSON格式数据。'
+                },
+                {
+                  role: 'user', 
+                  content: prompt
+                }
+              ]
+            })
+          });
+
+          if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`火山引擎API调用失败: ${response.status} ${response.statusText} - ${errorText}`);
+          }
+
+          const result = await response.json() as any;
+          const content = result.choices?.[0]?.message?.content;
+          
+          if (!content) {
+            throw new Error('火山引擎API返回数据格式错误');
+          }
+
+          // 解析JSON响应
+          const jsonMatch = content.match(/\{[\s\S]*?\}/);
+          if (!jsonMatch) {
+            throw new Error('响应中未找到有效的JSON数据');
+          }
+
+          const newData = JSON.parse(jsonMatch[0]);
+          
+          // 验证数据格式
+          if (!newData.pinyin || !Array.isArray(newData.words) || newData.words.length !== 3) {
+            throw new Error('返回的数据格式不正确');
+          }
+          
+          // 更新动态词语库
+          dynamicTextbookWords.set(character, newData);
+          
+          console.error(`✅ 已更新生字"${character}"的词语`);
+
+          return {
+            content: [{
+              type: 'text',
+              text: `✅ 已根据要求"${requirements}"重新生成词语\n\n🔤 生字：${character}\n🔤 拼音：${newData.pinyin}\n📖 新词语：${newData.words.join('、')}\n\n💡 新词语已保存，在听写中会使用新词语`
+            }]
+          };
+
+        } catch (error) {
+          console.error(`调整词语失败: ${error}`);
+          return {
+            content: [{
+              type: 'text',
+              text: `❌ 调整词语失败: ${error}\n\n请检查火山引擎API配置和网络连接`
+            }]
+          };
+        }
+      }
+
+      case 'set_voice_settings': {
+        const { 
+          voice = voiceSettings.voice, 
+          speed = voiceSettings.speed,
+          pause_duration = voiceSettings.pauseDuration
+        } = args || {};
+        
+        voiceSettings.voice = voice;
+        voiceSettings.speed = speed;
+        voiceSettings.pauseDuration = pause_duration;
+
+        return {
+          content: [{
+            type: 'text',
+            text: `✅ 语音设置已更新\n\n🗣️ 语音：${voice}\n⚡ 语速：${speed}\n⏱️ 停顿时间：${pause_duration}秒\n\n💡 新设置将在下次听写时生效`
+```
