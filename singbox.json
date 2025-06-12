@@ -93,9 +93,9 @@
     {
       "type": "vless",
       "tag": "proxy",
-      "server": "real.guyifashi.top",
+      "server": "服务器",
       "server_port": 443,
-      "uuid": "75a877ce-9a68-4c53-a37c-28098c06ff31",
+      "uuid": "UUID",
       "packet_encoding": "xudp",
       "flow": "xtls-rprx-vision",
       "tcp_fast_open": true,
@@ -103,7 +103,7 @@
       "tls": {
         "enabled": true,
         "insecure": false,
-        "server_name": "real.guyifashi.top",
+        "server_name": "服务器",
         "reality": {
           "enabled": true,
           "public_key": "3UYWqdk_RQDI23DRdEB6WKebxJ8Q-q_6nhnufsAh-Gk",
