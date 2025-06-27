@@ -106,8 +106,8 @@
         "server_name": "服务器",
         "reality": {
           "enabled": true,
-          "public_key": "3UYWqdk_RQDI23DRdEB6WKebxJ8Q-q_6nhnufsAh-Gk",
-          "short_id": "006825"
+          "public_key": "",
+          "short_id": ""
         },
         "utls": {
           "enabled": true,
