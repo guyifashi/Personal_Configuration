@@ -1,11 +1,10 @@
-#!name=精简去广告 (农行修复版)
-#!desc=复刻墨鱼的农行防检测规则，涵盖京东淘宝咸鱼高德。[by Gemini]
+#!name=精简去广告 (灭口版)
+#!desc=必须从SkipProxy中移除农行域名！通过拦截告密请求来绕过检测。[by Gemini]
 #!category=去广告
 
 [Rule]
-# --- 农业银行 (核心防检测) ---
-# 必须使用 REJECT，复刻墨鱼原版逻辑
-# 作用：拦截农行的安全上报接口，让 App 无法汇报“发现代理”的状态
+# --- 农业银行 (核心拦截) ---
+# 必须 REJECT。拦截它向服务器汇报“发现VPN”的请求。
 DOMAIN-SUFFIX,msmp.abchina.com.cn,REJECT
 
 # --- 高德地图 (防误杀) ---
@@ -30,13 +29,11 @@ https://ahrefs.com/writing-tools/paragraph-rewriter
 ^https?:\/\/track\.mm\.taou\.com/v\d\/track - reject
 ^https?:\/\/open\.taou\.com\/maimai\/launch_ad - reject
 
-# ================= 咸鱼 (Xianyu) 增强版 =================
+# ================= 咸鱼 (Xianyu) =================
 ^https?:\/\/(g-)?acs\.m\.goofish\.com\/gw\/mtop\.taobao\.idle\.home\.welcome - reject
 ^https?:\/\/(g-)?acs\.m\.goofish\.com\/gw\/mtop\.taobao\.idle\.puser\.guide\.get - reject
 ^https?:\/\/(g-)?acs\.m\.goofish\.com\/gw\/mtop\.idle\.ad\.expose - reject
 ^https?:\/\/(g-)?acs\.m\.goofish\.com\/gw\/mtop\..*splash - reject
-^https?:\/\/(g-)?acs\.m\.goofish\.com\/gw\/mtop\.taobao\.idle\.game - reject
-^https?:\/\/(g-)?acs\.m\.goofish\.com\/gw\/mtop\.taobao\.idle\.fish\.marketing - reject
 
 # ================= 京东 (JD) =================
 ^https:\/\/router-app-api\.jdcloud\.com\/v\d\/board\/routerAppSplash - reject
@@ -57,4 +54,5 @@ https://ahrefs.com/writing-tools/paragraph-rewriter
 ^https?:\/\/.*\.amap\.com\/ws\/valueadded\/weather - reject
 
 [MITM]
+# 确保绝对没有 abchina
 hostname = %APPEND% *.taobao.com, *.taou.com, *.goofish.com, *.jd.com, *.jdcloud.com, *.paojd.cn, *.amap.com
