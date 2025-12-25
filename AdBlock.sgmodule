@@ -1,0 +1,60 @@
+#!name=精简去广告 (农行修复版)
+#!desc=复刻墨鱼的农行防检测规则，涵盖京东淘宝咸鱼高德。[by Gemini]
+#!category=去广告
+
+[Rule]
+# --- 农业银行 (核心防检测) ---
+# 必须使用 REJECT，复刻墨鱼原版逻辑
+# 作用：拦截农行的安全上报接口，让 App 无法汇报“发现代理”的状态
+DOMAIN-SUFFIX,msmp.abchina.com.cn,REJECT
+
+# --- 高德地图 (防误杀) ---
+DOMAIN-SUFFIX,optimus-ads.amap.com,DIRECT
+
+https://ahrefs.com/writing-tools/paragraph-rewriter
+# ================= 淘宝 (Taobao) =================
+^https:\/\/acs\.m\.taobao\.com\/gw\/mtop\.fliggy\.crm\.screen\.allresource - reject
+^https?:\/\/[a-zA-Z0-9_.-]+\.taobao\.com\/gw\/mtop\.alimama\.abyss\.unionpage\.get - reject
+^https?:\/\/[a-zA-Z0-9_.-]+\.taobao\.com\/gw\/mtop\.cainiao\.adx\.flyad\.getad - reject
+^https?:\/\/[a-zA-Z0-9_.-]+\.taobao\.com\/gw\/mtop\.cainiao\.guoguo\.nbnetflow\.ads\. - reject
+^https?:\/\/[a-zA-Z0-9_.-]+\.taobao\.com\/gw\/mtop\.cainiao\.nbmensa\.research\.researchservice\.consultmerge - reject
+^https?:\/\/acs\.m\.taobao\.com\/gw\/mtop\.alibaba\.advertisementservice\.getadv\/ - reject
+^https?:\/\/acs\.m\.taobao\.com\/gw\/mtop\.alibaba\.aicloud\.splash - reject
+^https?:\/\/acs\.m\.taobao\.com\/gw\/mtop\.alibaba\.cbu\.app\.homepage\.startup - reject
+^https?:\/\/acs\.m\.taobao\.com\/gw\/mtop\.alibaba\.mos\.app\.homepage\.launch - reject
+^https?:\/\/acs\.m\.taobao\.com\/gw\/mtop\.alimama\.etao\.config\.query - reject
+^https?:\/\/acs\.m\.taobao\.com\/gw\/mtop\.damai\.mec\.popup\.get - reject
+^https?:\/\/acs\.m\.taobao\.com\/gw\/mtop\.damai\.wireless\.home\.welcome - reject
+^https?:\/\/acs\.m\.taobao\.com\/gw\/mtop\.etao\.noah\.query.*etao_splash - reject
+^https?:\/\/acs\.m\.taobao\.com\/gw\/mtop\.film\.mtopadvertiseapi\.queryadvertise\/ - reject
+^https?:\/\/track\.mm\.taou\.com/v\d\/track - reject
+^https?:\/\/open\.taou\.com\/maimai\/launch_ad - reject
+
+# ================= 咸鱼 (Xianyu) 增强版 =================
+^https?:\/\/(g-)?acs\.m\.goofish\.com\/gw\/mtop\.taobao\.idle\.home\.welcome - reject
+^https?:\/\/(g-)?acs\.m\.goofish\.com\/gw\/mtop\.taobao\.idle\.puser\.guide\.get - reject
+^https?:\/\/(g-)?acs\.m\.goofish\.com\/gw\/mtop\.idle\.ad\.expose - reject
+^https?:\/\/(g-)?acs\.m\.goofish\.com\/gw\/mtop\..*splash - reject
+^https?:\/\/(g-)?acs\.m\.goofish\.com\/gw\/mtop\.taobao\.idle\.game - reject
+^https?:\/\/(g-)?acs\.m\.goofish\.com\/gw\/mtop\.taobao\.idle\.fish\.marketing - reject
+
+# ================= 京东 (JD) =================
+^https:\/\/router-app-api\.jdcloud\.com\/v\d\/board\/routerAppSplash - reject
+^https?:\/\/(bdsp-x|dsp-x)\.jd\.com\/adx\/ - reject
+^https?:\/\/jdread-api\.jd\.com\/jdread\/api\/channel\/module\/opens - reject
+^https?:\/\/jdread-api\.jd\.com\/jdread\/api\/popup - reject
+^https?:\/\/lop-proxy\.jd\.com\/queryAppHomePageMarketingRecommendRuleConfigInfo - reject
+^https?:\/\/ms\.jr\.jd\.com\/gw\/generic\/aladdin\/(new)?na\/m\/getLoadingPicture - reject
+^https?:\/\/pjlapi\.paojd\.cn\/na\/pjlNa - reject
+
+# ================= 高德地图 (Amap) =================
+^https?:\/\/.*\.amap\.com\/uploadimg\/\w+\.gif - reject
+^https?:\/\/.*\.amap\.com\/ws\/aos\/alimama\/splash_screen - reject
+^https?:\/\/.*\.amap\.com\/ws\/asa\/ads_attribution - reject
+^https?:\/\/.*\.amap\.com\/ws\/boss\/order_web\/\w{8}_information - reject
+^https?:\/\/.*\.amap\.com\/ws\/faas\/amap-navigation\/card-service-route-plan\? - reject
+^https?:\/\/.*\.amap\.com\/ws\/shield\/scene\/recommend - reject
+^https?:\/\/.*\.amap\.com\/ws\/valueadded\/weather - reject
+
+[MITM]
+hostname = %APPEND% *.taobao.com, *.taou.com, *.goofish.com, *.jd.com, *.jdcloud.com, *.paojd.cn, *.amap.com
