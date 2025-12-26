@@ -1,13 +1,17 @@
-#!name=精简去广告 (灭口版)
-#!desc=必须从SkipProxy中移除农行域名！通过拦截告密请求来绕过检测。[by Gemini]
+#!name=精简去广告 (DNS投毒版)
+#!desc=使用Host段强制屏蔽农行检测域名，优先级最高。[by Gemini]
 #!category=去广告
 
-[Rule]
-# --- 农业银行 (核心拦截) ---
-# 必须 REJECT。拦截它向服务器汇报“发现VPN”的请求。
-DOMAIN-SUFFIX,msmp.abchina.com.cn,REJECT
+# ⚠️ 核心改动：用 [Host] 代替 [Rule] 进行拦截
+# 原理：直接告诉 App，msmp.abchina.com.cn 的 IP 是 127.0.0.1
+# 这样 App 根本无法建立连接，也不会经过 Surge 的复杂规则匹配，效果最稳。
+[Host]
+msmp.abchina.com.cn = 127.0.0.1
 
-# --- 高德地图 (防误杀) ---
+[Rule]
+# 这里的 Rule 作为双重保险（其实 Host 生效了这里就不需要了，但留着没错）
+DOMAIN-SUFFIX,msmp.abchina.com.cn,REJECT
+# 高德防误杀
 DOMAIN-SUFFIX,optimus-ads.amap.com,DIRECT
 
 https://ahrefs.com/writing-tools/paragraph-rewriter
@@ -54,5 +58,4 @@ https://ahrefs.com/writing-tools/paragraph-rewriter
 ^https?:\/\/.*\.amap\.com\/ws\/valueadded\/weather - reject
 
 [MITM]
-# 确保绝对没有 abchina
 hostname = %APPEND% *.taobao.com, *.taou.com, *.goofish.com, *.jd.com, *.jdcloud.com, *.paojd.cn, *.amap.com
