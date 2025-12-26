@@ -1,17 +1,14 @@
-#!name=精简去广告 (DNS投毒版)
-#!desc=使用Host段强制屏蔽农行检测域名，优先级最高。[by Gemini]
+#!name=精简去广告 (农行修复版)
+#!desc=复刻墨鱼的农行防检测规则，涵盖京东淘宝咸鱼高德。[by Gemini]
 #!category=去广告
 
-# ⚠️ 核心改动：用 [Host] 代替 [Rule] 进行拦截
-# 原理：直接告诉 App，msmp.abchina.com.cn 的 IP 是 127.0.0.1
-# 这样 App 根本无法建立连接，也不会经过 Surge 的复杂规则匹配，效果最稳。
-[Host]
-msmp.abchina.com.cn = 127.0.0.1
-
 [Rule]
-# 这里的 Rule 作为双重保险（其实 Host 生效了这里就不需要了，但留着没错）
+# --- 农业银行 (核心防检测) ---
+# 必须使用 REJECT，复刻墨鱼原版逻辑
+# 作用：拦截农行的安全上报接口，让 App 无法汇报“发现代理”的状态
 DOMAIN-SUFFIX,msmp.abchina.com.cn,REJECT
-# 高德防误杀
+
+# --- 高德地图 (防误杀) ---
 DOMAIN-SUFFIX,optimus-ads.amap.com,DIRECT
 
 https://ahrefs.com/writing-tools/paragraph-rewriter
@@ -33,11 +30,13 @@ https://ahrefs.com/writing-tools/paragraph-rewriter
 ^https?:\/\/track\.mm\.taou\.com/v\d\/track - reject
 ^https?:\/\/open\.taou\.com\/maimai\/launch_ad - reject
 
-# ================= 咸鱼 (Xianyu) =================
+# ================= 咸鱼 (Xianyu) 增强版 =================
 ^https?:\/\/(g-)?acs\.m\.goofish\.com\/gw\/mtop\.taobao\.idle\.home\.welcome - reject
 ^https?:\/\/(g-)?acs\.m\.goofish\.com\/gw\/mtop\.taobao\.idle\.puser\.guide\.get - reject
 ^https?:\/\/(g-)?acs\.m\.goofish\.com\/gw\/mtop\.idle\.ad\.expose - reject
 ^https?:\/\/(g-)?acs\.m\.goofish\.com\/gw\/mtop\..*splash - reject
+^https?:\/\/(g-)?acs\.m\.goofish\.com\/gw\/mtop\.taobao\.idle\.game - reject
+^https?:\/\/(g-)?acs\.m\.goofish\.com\/gw\/mtop\.taobao\.idle\.fish\.marketing - reject
 
 # ================= 京东 (JD) =================
 ^https:\/\/router-app-api\.jdcloud\.com\/v\d\/board\/routerAppSplash - reject
